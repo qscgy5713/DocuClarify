@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Application Data & ChromaDB
+data/*
+!data/.gitkeep
+uploads/
+*.sqlite3
+
+# OS & Editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+.env

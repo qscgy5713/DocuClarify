@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DocuClarify - 本地優先文件問答與精確引用</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Marked.js for Markdown Rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+    /* Markdown prose custom styling */
+    .prose-custom p { margin-bottom: 0.75rem; }
+    .prose-custom p:last-child { margin-bottom: 0; }
+    .prose-custom table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.8rem; }
+    .prose-custom th, .prose-custom td { border: 1px solid #e2e8f0; padding: 0.4rem 0.6rem; text-align: left; }
+    .prose-custom th { background-color: #f8fafc; font-weight: 600; color: #334155; }
+    .prose-custom pre { background: #0f172a; color: #f8fafc; padding: 0.75rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.5rem 0; font-family: monospace; font-size: 0.8rem; }
+    .prose-custom code { background: #f1f5f9; color: #0f172a; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.85em; }
+    .prose-custom pre code { background: transparent; color: inherit; padding: 0; }
+    .prose-custom ul { list-style-type: disc; margin-left: 1.25rem; margin-bottom: 0.5rem; }
+    .prose-custom ol { list-style-type: decimal; margin-left: 1.25rem; margin-bottom: 0.5rem; }
+    .prose-custom h1, .prose-custom h2, .prose-custom h3 { font-weight: 700; margin-top: 0.75rem; margin-bottom: 0.25rem; color: #0f172a; }
+    .prose-custom h1 { font-size: 1.2rem; }
+    .prose-custom h2 { font-size: 1.1rem; }
+    .prose-custom h3 { font-size: 1.0rem; }
+    .prose-custom blockquote { border-left: 3px solid #6366f1; padding-left: 0.75rem; color: #64748b; margin: 0.5rem 0; font-style: italic; }
+
+    @keyframes cursor-blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    .cursor-pulse {
+      animation: cursor-blink 0.8s infinite;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 flex flex-col h-screen overflow-hidden font-sans antialiased">
+
+  <!-- Top Navigation Header -->
+  <header class="bg-white border-b border-slate-200 px-6 py-3.5 flex items-center justify-between shrink-0 shadow-sm">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-md shadow-indigo-100">
+        <i data-lucide="file-search" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-lg font-bold tracking-tight text-slate-800">DocuClarify</h1>
+          <span class="text-[11px] font-semibold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200/60">BYOK 零密鑰留存</span>
+        </div>
+        <p class="text-xs text-slate-500">混合檢索 (BM25 + 向量)・連續段落拼接・精確引用</p>
+      </div>
+    </div>
+
+    <!-- Right Header Actions -->
+    <div class="flex items-center gap-2.5">
+      <div id="aiStatusBadge" class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+        <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+        <span id="aiStatusText">未設定 AI API</span>
+      </div>
+
+      <button onclick="exportChatMarkdown()" class="flex items-center gap-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-300 transition-all" title="匯出對話為 Markdown 文件">
+        <i data-lucide="download" class="w-3.5 h-3.5"></i>
+        <span>匯出對話</span>
+      </button>
+
+      <button onclick="clearChatHistory()" class="flex items-center gap-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-300 transition-all" title="清空對話歷史">
+        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+        <span>清空對話</span>
+      </button>
+
+      <button onclick="openSettingsModal()" class="flex items-center gap-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-300 transition-all">
+        <i data-lucide="settings" class="w-3.5 h-3.5"></i>
+        <span>AI 連線設定</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Body Layout: Sidebar + Chat Area -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- Left Sidebar: Documents & Knowledge Base -->
+    <aside class="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0">
+      
+      <!-- Upload Section -->
+      <div class="p-4 border-b border-slate-100">
+        <label class="block text-xs font-semibold text-slate-600 mb-2 uppercase tracking-wider">知識庫文件上傳</label>
+        
+        <div id="dropZone" class="border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-xl p-4 text-center cursor-pointer transition-colors bg-slate-50 hover:bg-indigo-50/30">
+          <input type="file" id="fileInput" class="hidden" accept=".pdf,.txt,.md">
+          <div class="flex flex-col items-center justify-center gap-1.5">
+            <div class="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center">
+              <i data-lucide="upload-cloud" class="w-4 h-4"></i>
+            </div>
+            <p class="text-xs font-medium text-slate-700">點擊或拖曳文件至此</p>
+            <p class="text-[11px] text-slate-400">支援 PDF、Markdown、TXT</p>
+          </div>
+        </div>
+
+        <!-- Upload Status Spinner -->
+        <div id="uploadStatus" class="hidden mt-2 text-xs flex items-center gap-2 p-2 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200">
+          <i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i>
+          <span id="uploadStatusMsg">正在解析文件並建立向量...</span>
+        </div>
+      </div>
+
+      <!-- Scope Filter & Document List Header -->
+      <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+        <div class="flex items-center gap-1.5">
+          <i data-lucide="files" class="w-3.5 h-3.5 text-slate-500"></i>
+          <span class="text-xs font-semibold text-slate-700">已索引文件</span>
+        </div>
+        <button onclick="selectScope(null)" id="btnScopeAll" class="text-[11px] font-medium text-indigo-600 hover:underline">
+          檢索全部
+        </button>
+      </div>
+
+      <!-- Document List Container -->
+      <div id="documentsList" class="flex-1 overflow-y-auto p-3 space-y-2">
+        <div id="docsEmptyState" class="text-center py-10 px-4 text-slate-400">
+          <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+          <p class="text-xs">目前尚未上傳任何文件</p>
+          <p class="text-[11px] text-slate-400 mt-1">上傳後即可在右側以對話方式查詢內容</p>
+        </div>
+      </div>
+
+      <!-- Scope Indicator at Bottom of Sidebar -->
+      <div class="p-3 bg-slate-50 border-t border-slate-200 text-xs text-slate-600 flex items-center justify-between">
+        <span class="truncate">範圍：<b id="activeScopeLabel" class="text-indigo-600">全部文件</b></span>
+      </div>
+    </aside>
+
+    <!-- Main Chat Workspace -->
+    <main class="flex-1 flex flex-col bg-slate-50 overflow-hidden relative">
+
+      <!-- Chat Messages Container -->
+      <div id="chatContainer" class="flex-1 overflow-y-auto p-6 space-y-5">
+        
+        <!-- Welcome Message Bubble -->
+        <div class="max-w-3xl mx-auto bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
+          <div class="flex items-start gap-4">
+            <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-100">
+              <i data-lucide="sparkles" class="w-5 h-5"></i>
+            </div>
+            <div class="space-y-3 text-sm text-slate-700">
+              <h3 class="text-base font-bold text-slate-900">歡迎使用 DocuClarify</h3>
+              <p>這是一個<strong>純本地儲存、零金鑰託管</strong>的文件智能檢索工具。支援<strong>混合檢索 (BM25 + 向量 RRF)</strong>、<strong>即時打字機串流輸出</strong>、<strong>Markdown 格式排版</strong>與<strong>多輪追問</strong>。</p>
+              
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div class="font-semibold text-xs text-slate-800 flex items-center gap-1.5 mb-1">
+                    <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 inline-flex items-center justify-center text-xs">1</span>
+                    設定 AI 連線
+                  </div>
+                  <p class="text-xs text-slate-500">點擊右上角「AI 連線設定」，填入您的 Base URL 與 API Key（支援 OpenAI、Ollama、DeepSeek、Groq 等）。</p>
+                </div>
+
+                <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div class="font-semibold text-xs text-slate-800 flex items-center gap-1.5 mb-1">
+                    <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 inline-flex items-center justify-center text-xs">2</span>
+                    上傳文件並提問
+                  </div>
+                  <p class="text-xs text-slate-500">拖曳 PDF、TXT 或 Markdown 檔案，系統自動切塊索引，回答時精準標註來源頁碼與段落。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Chat Input Area -->
+      <div class="p-4 bg-white border-t border-slate-200 shrink-0">
+        <div class="max-w-3xl mx-auto">
+          <form id="chatForm" onsubmit="handleSendMessage(event)" class="relative flex items-end gap-2 bg-slate-50 rounded-2xl border border-slate-300 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-200/50 p-2 transition-all">
+            <textarea
+              id="questionInput"
+              rows="1"
+              placeholder="輸入問題，針對已索引的文件進行提問... (Enter 發送，Shift+Enter 換行)"
+              class="w-full bg-transparent resize-none outline-none text-sm text-slate-800 px-2 py-1 max-h-32"
+              onkeydown="handleKeyDown(event)"
+              oncompositionstart="onCompositionStart(event)"
+              oncompositionend="onCompositionEnd(event)"
+              oninput="autoResizeTextarea(this)"
+            ></textarea>
+            
+            <button
+              type="submit"
+              id="btnSend"
+              class="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl p-2.5 transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+            >
+              <i data-lucide="send" class="w-4 h-4"></i>
+            </button>
+          </form>
+          <div class="flex items-center justify-between text-[11px] text-slate-400 mt-2 px-1">
+            <span>混合檢索 (BM25 + 向量 RRF) 驅動，支援 Markdown 排版與多輪記憶</span>
+            <span>DocuClarify v1.2</span>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- AI Settings Modal -->
+  <div id="settingsModal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden transform transition-all">
+      
+      <!-- Modal Header -->
+      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+        <div class="flex items-center gap-2">
+          <i data-lucide="cpu" class="w-5 h-5 text-indigo-600"></i>
+          <h2 class="text-base font-bold text-slate-800">AI 連線設定 (BYOK)</h2>
+        </div>
+        <button onclick="closeSettingsModal()" class="text-slate-400 hover:text-slate-600 transition-colors">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="p-6 space-y-4">
+        
+        <!-- Quick Preset Dropdown -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">快速預設載入</label>
+          <select id="presetSelect" onchange="applyPreset(this.value)" class="w-full text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-indigo-500 font-medium">
+            <option value="gemini" selected>Google Gemini 官方 (推薦)</option>
+            <option value="claude">Anthropic Claude (官方端點)</option>
+            <option value="openrouter">OpenRouter (Claude / 多模型網關)</option>
+            <option value="openai">OpenAI 官方 (Cloud)</option>
+            <option value="ollama">Ollama (本機 Docker 請用 host.docker.internal)</option>
+            <option value="deepseek">DeepSeek 官方 API</option>
+            <option value="groq">Groq 高速推理 API</option>
+            <option value="custom">自訂配置 (Custom)</option>
+          </select>
+        </div>
+
+        <!-- Base URL -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            API Base URL <span class="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            id="cfgBaseUrl"
+            placeholder="https://generativelanguage.googleapis.com/v1beta/openai/"
+            class="w-full text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-indigo-500"
+          >
+          <p class="text-[11px] text-slate-400 mt-1">Gemini 官方相容端點：<code>https://generativelanguage.googleapis.com/v1beta/openai/</code></p>
+        </div>
+
+        <!-- API Key / Token -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            API Key / Token
+          </label>
+          <div class="relative">
+            <input
+              type="password"
+              id="cfgApiKey"
+              placeholder="AIzaSy...（Gemini 免費金鑰）或 sk-..."
+              class="w-full text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 pr-9 outline-none focus:border-indigo-500"
+            >
+            <button type="button" onclick="togglePasswordVisibility('cfgApiKey', this)" class="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600">
+              <i data-lucide="eye" class="w-4 h-4"></i>
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">本金鑰僅保存在本機瀏覽器 LocalStorage，伺服器絕不儲存。</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <!-- Chat Model -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">
+              問答模型 (Chat Model) <span class="text-red-500">*</span>
+            </label>
+            <select
+              id="cfgChatModel"
+              onchange="onModelSelectChange('cfgChatModel', 'cfgChatModelCustom')"
+              class="w-full text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-indigo-500 font-medium"
+            >
+            </select>
+            <input
+              type="text"
+              id="cfgChatModelCustom"
+              placeholder="輸入自訂問答模型名稱..."
+              class="hidden mt-1.5 w-full text-xs font-mono bg-white border border-indigo-300 rounded-lg px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-indigo-500"
+            >
+          </div>
+
+          <!-- Embedding Model -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">
+              嵌入模型 (Embedding Model) <span class="text-red-500">*</span>
+            </label>
+            <select
+              id="cfgEmbeddingModel"
+              onchange="onModelSelectChange('cfgEmbeddingModel', 'cfgEmbeddingModelCustom')"
+              class="w-full text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-indigo-500 font-medium"
+            >
+            </select>
+            <input
+              type="text"
+              id="cfgEmbeddingModelCustom"
+              placeholder="輸入自訂嵌入模型名稱..."
+              class="hidden mt-1.5 w-full text-xs font-mono bg-white border border-indigo-300 rounded-lg px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-indigo-500"
+            >
+          </div>
+        </div>
+
+        <!-- Connection Test Result Box -->
+        <div id="testResultBox" class="hidden text-xs p-3 rounded-xl border"></div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-6 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+        <button
+          type="button"
+          onclick="testConnection()"
+          id="btnTestConnection"
+          class="text-xs font-medium text-slate-700 hover:text-slate-900 bg-white border border-slate-300 hover:bg-slate-50 px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5"
+        >
+          <i data-lucide="activity" class="w-3.5 h-3.5"></i>
+          <span>測試連線</span>
+        </button>
+
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            onclick="closeSettingsModal()"
+            class="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-2 rounded-xl"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onclick="saveSettings()"
+            class="text-xs font-medium bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-sm transition-all"
+          >
+            儲存設定
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    // State management
+    let activeDocScope = null; // null means search all docs
+    let documents = [];
+    let conversationHistory = []; // Multi-turn chat memory
+    let lastCitationsMap = {}; // Maps bubbleId to citations array
+
+    const PRESETS = {
+      gemini: {
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+        chatModel: "gemini-3.8-flash",
+        embeddingModel: "gemini-embedding-001"
+      },
+      claude: {
+        baseUrl: "https://api.anthropic.com/v1",
+        chatModel: "claude-3-5-sonnet-20241022",
+        embeddingModel: "text-embedding-3-small"
+      },
+      openrouter: {
+        baseUrl: "https://openrouter.ai/api/v1",
+        chatModel: "anthropic/claude-3.5-sonnet",
+        embeddingModel: "text-embedding-3-small"
+      },
+      openai: {
+        baseUrl: "https://api.openai.com/v1",
+        chatModel: "gpt-4o-mini",
+        embeddingModel: "text-embedding-3-small"
+      },
+      ollama: {
+        baseUrl: "http://host.docker.internal:11434/v1",
+        chatModel: "llama3.2",
+        embeddingModel: "nomic-embed-text"
+      },
+      deepseek: {
+        baseUrl: "https://api.deepseek.com/v1",
+        chatModel: "deepseek-chat",
+        embeddingModel: "text-embedding-3-small"
+      },
+      groq: {
+        baseUrl: "https://api.groq.com/openai/v1",
+        chatModel: "llama-3.3-70b-versatile",
+        embeddingModel: "nomic-embed-text"
+      }
+    };
+
+    const PROVIDER_MODELS = {
+      gemini: {
+        chatModels: [
+          { value: "gemini-3.8-flash", label: "gemini-3.8-flash (最新旗艦・極速長文本推薦)" },
+          { value: "gemini-3.5-flash-lite", label: "gemini-3.5-flash-lite (超高速・最省額度)" },
+          { value: "gemini-3.1-pro-preview", label: "gemini-3.1-pro-preview (高階深度推理)" },
+          { value: "gemini-2.5-flash", label: "gemini-2.5-flash (2.5 穩定旗艦)" },
+          { value: "gemini-2.5-pro", label: "gemini-2.5-pro (2.5 深度推理)" },
+          { value: "gemini-1.5-flash", label: "gemini-1.5-flash (經典舊版)" }
+        ],
+        embeddingModels: [
+          { value: "gemini-embedding-001", label: "gemini-embedding-001 (Google 最新官方向量)" },
+          { value: "gemini-embedding-2-preview", label: "gemini-embedding-2-preview (多模態向量)" },
+          { value: "text-embedding-004", label: "text-embedding-004 (經典文本向量)" }
+        ]
+      },
+      claude: {
+        chatModels: [
+          { value: "claude-3-5-sonnet-20241022", label: "claude-3-5-sonnet (最新旗艦・代碼推理首選)" },
+          { value: "claude-3-5-haiku-20241022", label: "claude-3-5-haiku (極速輕量)" },
+          { value: "claude-3-opus-20240229", label: "claude-3-opus (深度長文)" }
+        ],
+        embeddingModels: [
+          { value: "text-embedding-3-small", label: "text-embedding-3-small (搭配 OpenAI 1536維)" },
+          { value: "gemini-embedding-001", label: "gemini-embedding-001 (搭配 Google 官方 768維)" },
+          { value: "nomic-embed-text", label: "nomic-embed-text (搭配本地 Ollama 免費)" }
+        ]
+      },
+      openrouter: {
+        chatModels: [
+          { value: "anthropic/claude-3.5-sonnet", label: "anthropic/claude-3.5-sonnet (推薦)" },
+          { value: "anthropic/claude-3.5-haiku", label: "anthropic/claude-3.5-haiku" },
+          { value: "anthropic/claude-3-opus", label: "anthropic/claude-3-opus" }
+        ],
+        embeddingModels: [
+          { value: "text-embedding-3-small", label: "text-embedding-3-small (推薦)" },
+          { value: "nomic-embed-text", label: "nomic-embed-text" }
+        ]
+      },
+      openai: {
+        chatModels: [
+          { value: "gpt-4o-mini", label: "gpt-4o-mini (平價推薦・高速)" },
+          { value: "gpt-4o", label: "gpt-4o (旗艦全能)" },
+          { value: "o3-mini", label: "o3-mini (強化推理)" },
+          { value: "gpt-3.5-turbo", label: "gpt-3.5-turbo (傳統舊版)" }
+        ],
+        embeddingModels: [
+          { value: "text-embedding-3-small", label: "text-embedding-3-small (推薦 1536維)" },
+          { value: "text-embedding-3-large", label: "text-embedding-3-large (高精 3072維)" },
+          { value: "text-embedding-ada-002", label: "text-embedding-ada-002" }
+        ]
+      },
+      ollama: {
+        chatModels: [
+          { value: "llama3.2", label: "llama3.2 (Meta 輕量推薦)" },
+          { value: "llama3.1", label: "llama3.1" },
+          { value: "qwen2.5", label: "qwen2.5 (通義千問・繁中強項)" },
+          { value: "mistral", label: "mistral" },
+          { value: "gemma2", label: "gemma2" }
+        ],
+        embeddingModels: [
+          { value: "nomic-embed-text", label: "nomic-embed-text (推薦)" },
+          { value: "bge-m3", label: "bge-m3 (多語言高精)" },
+          { value: "mxbai-embed-large", label: "mxbai-embed-large" },
+          { value: "all-minilm", label: "all-minilm" }
+        ]
+      },
+      deepseek: {
+        chatModels: [
+          { value: "deepseek-chat", label: "deepseek-chat (DeepSeek-V3)" },
+          { value: "deepseek-reasoner", label: "deepseek-reasoner (DeepSeek-R1 推理)" }
+        ],
+        embeddingModels: [
+          { value: "text-embedding-3-small", label: "text-embedding-3-small (搭配 OpenAI)" },
+          { value: "nomic-embed-text", label: "nomic-embed-text (搭配本地 Ollama)" }
+        ]
+      },
+      groq: {
+        chatModels: [
+          { value: "llama-3.3-70b-versatile", label: "llama-3.3-70b-versatile (推薦)" },
+          { value: "llama-3.1-8b-instant", label: "llama-3.1-8b-instant (極速)" },
+          { value: "mixtral-8x7b-32768", label: "mixtral-8x7b-32768" }
+        ],
+        embeddingModels: [
+          { value: "nomic-embed-text", label: "nomic-embed-text (搭配本地 Ollama)" },
+          { value: "text-embedding-3-small", label: "text-embedding-3-small (搭配 OpenAI)" }
+        ]
+      }
+    };
+
+    // Initialize application on load
+    document.addEventListener("DOMContentLoaded", () => {
+      lucide.createIcons();
+      loadSettingsToInputs();
+      updateStatusBadge();
+      fetchDocuments();
+      setupDragAndDrop();
+    });
+
+    // Helper: LocalStorage settings getter/setter
+    function getStoredSettings() {
+      return {
+        baseUrl: localStorage.getItem("docu_base_url") || "https://generativelanguage.googleapis.com/v1beta/openai/",
+        apiKey: localStorage.getItem("docu_api_key") || "",
+        chatModel: localStorage.getItem("docu_chat_model") || "gemini-3.8-flash",
+        embeddingModel: localStorage.getItem("docu_embedding_model") || "gemini-embedding-001"
+      };
+    }
+
+    function saveStoredSettings(settings) {
+      localStorage.setItem("docu_base_url", settings.baseUrl);
+      localStorage.setItem("docu_api_key", settings.apiKey);
+      localStorage.setItem("docu_chat_model", settings.chatModel);
+      localStorage.setItem("docu_embedding_model", settings.embeddingModel);
+    }
+
+    function populateModelDropdowns(providerKey, targetChatModel, targetEmbeddingModel) {
+      const pData = PROVIDER_MODELS[providerKey] || PROVIDER_MODELS["gemini"];
+
+      // Populate Chat Models
+      const chatSel = document.getElementById("cfgChatModel");
+      const chatCustom = document.getElementById("cfgChatModelCustom");
+      chatSel.innerHTML = "";
+      let chatMatched = false;
+
+      pData.chatModels.forEach(m => {
+        const opt = document.createElement("option");
+        opt.value = m.value;
+        opt.textContent = m.label;
+        if (m.value === targetChatModel) {
+          opt.selected = true;
+          chatMatched = true;
+        }
+        chatSel.appendChild(opt);
+      });
+
+      const optChatCustom = document.createElement("option");
+      optChatCustom.value = "__custom__";
+      optChatCustom.textContent = "➕ 自訂其他問答模型名稱...";
+      chatSel.appendChild(optChatCustom);
+
+      if (chatMatched) {
+        chatCustom.classList.add("hidden");
+        chatCustom.value = "";
+      } else {
+        chatSel.value = "__custom__";
+        chatCustom.classList.remove("hidden");
+        chatCustom.value = targetChatModel || "";
+      }
+
+      // Populate Embedding Models
+      const embSel = document.getElementById("cfgEmbeddingModel");
+      const embCustom = document.getElementById("cfgEmbeddingModelCustom");
+      embSel.innerHTML = "";
+      let embMatched = false;
+
+      pData.embeddingModels.forEach(m => {
+        const opt = document.createElement("option");
+        opt.value = m.value;
+        opt.textContent = m.label;
+        if (m.value === targetEmbeddingModel) {
+          opt.selected = true;
+          embMatched = true;
+        }
+        embSel.appendChild(opt);
+      });
+
+      const optEmbCustom = document.createElement("option");
+      optEmbCustom.value = "__custom__";
+      optEmbCustom.textContent = "➕ 自訂其他嵌入模型名稱...";
+      embSel.appendChild(optEmbCustom);
+
+      if (embMatched) {
+        embCustom.classList.add("hidden");
+        embCustom.value = "";
+      } else {
+        embSel.value = "__custom__";
+        embCustom.classList.remove("hidden");
+        embCustom.value = targetEmbeddingModel || "";
+      }
+    }
+
+    function onModelSelectChange(selectId, customInputId) {
+      const sel = document.getElementById(selectId);
+      const custom = document.getElementById(customInputId);
+      if (sel.value === "__custom__") {
+        custom.classList.remove("hidden");
+        custom.focus();
+      } else {
+        custom.classList.add("hidden");
+      }
+    }
+
+    function getChatModelValue() {
+      const sel = document.getElementById("cfgChatModel");
+      if (sel.value === "__custom__") {
+        return document.getElementById("cfgChatModelCustom").value.trim();
+      }
+      return sel.value.trim();
+    }
+
+    function getEmbeddingModelValue() {
+      const sel = document.getElementById("cfgEmbeddingModel");
+      if (sel.value === "__custom__") {
+        return document.getElementById("cfgEmbeddingModelCustom").value.trim();
+      }
+      return sel.value.trim();
+    }
+
+    function loadSettingsToInputs() {
+      const s = getStoredSettings();
+      document.getElementById("cfgBaseUrl").value = s.baseUrl;
+      document.getElementById("cfgApiKey").value = s.apiKey;
+
+      let providerKey = "gemini";
+      if (s.baseUrl.includes("generativelanguage.googleapis.com")) {
+        providerKey = "gemini";
+      } else if (s.baseUrl.includes("anthropic.com")) {
+        providerKey = "claude";
+      } else if (s.baseUrl.includes("openrouter.ai")) {
+        providerKey = "openrouter";
+      } else if (s.baseUrl.includes("openai.com")) {
+        providerKey = "openai";
+      } else if (s.baseUrl.includes("11434")) {
+        providerKey = "ollama";
+      } else if (s.baseUrl.includes("deepseek.com")) {
+        providerKey = "deepseek";
+      } else if (s.baseUrl.includes("groq.com")) {
+        providerKey = "groq";
+      } else {
+        providerKey = "custom";
+      }
+
+      const sel = document.getElementById("presetSelect");
+      if (sel) sel.value = providerKey;
+
+      populateModelDropdowns(providerKey, s.chatModel, s.embeddingModel);
+    }
+
+    function updateStatusBadge() {
+      const s = getStoredSettings();
+      const badge = document.getElementById("aiStatusBadge");
+
+      if (s.baseUrl && s.chatModel) {
+        badge.className = "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200";
+        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span><span>模型: ${escapeHtml(s.chatModel)}</span>`;
+      } else {
+        badge.className = "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200";
+        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span><span>未設定 AI API</span>`;
+      }
+    }
+
+    function applyPreset(presetKey) {
+      if (PRESETS[presetKey]) {
+        const p = PRESETS[presetKey];
+        document.getElementById("cfgBaseUrl").value = p.baseUrl;
+        populateModelDropdowns(presetKey, p.chatModel, p.embeddingModel);
+      } else if (presetKey === "custom") {
+        populateModelDropdowns("custom", getChatModelValue(), getEmbeddingModelValue());
+      }
+    }
+
+    function openSettingsModal() {
+      loadSettingsToInputs();
+      document.getElementById("testResultBox").className = "hidden";
+      document.getElementById("settingsModal").classList.remove("hidden");
+    }
+
+    function closeSettingsModal() {
+      document.getElementById("settingsModal").classList.add("hidden");
+    }
+
+    function togglePasswordVisibility(inputId, btn) {
+      const input = document.getElementById(inputId);
+      const isPassword = input.type === "password";
+      input.type = isPassword ? "text" : "password";
+      btn.innerHTML = isPassword ? `<i data-lucide="eye-off" class="w-4 h-4"></i>` : `<i data-lucide="eye" class="w-4 h-4"></i>`;
+      lucide.createIcons();
+    }
+
+    async function testConnection() {
+      const baseUrl = document.getElementById("cfgBaseUrl").value.trim();
+      const apiKey = document.getElementById("cfgApiKey").value.trim();
+      const chatModel = getChatModelValue();
+
+      const btn = document.getElementById("btnTestConnection");
+      const box = document.getElementById("testResultBox");
+
+      btn.disabled = true;
+      btn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i><span>連線測試中...</span>`;
+      box.className = "hidden";
+      lucide.createIcons();
+
+      try {
+        const res = await fetch("/api/test-connection", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ base_url: baseUrl, api_key: apiKey, chat_model: chatModel })
+        });
+        const data = await res.json();
+        
+        box.classList.remove("hidden");
+        if (data.success) {
+          box.className = "text-xs p-3 rounded-xl border bg-emerald-50 text-emerald-800 border-emerald-200";
+          box.innerText = "✓ " + data.message;
+        } else {
+          box.className = "text-xs p-3 rounded-xl border bg-rose-50 text-rose-800 border-rose-200";
+          box.innerText = "✗ " + data.message;
+        }
+      } catch (err) {
+        box.classList.remove("hidden");
+        box.className = "text-xs p-3 rounded-xl border bg-rose-50 text-rose-800 border-rose-200";
+        box.innerText = "✗ 呼叫後端連線測試失敗：" + err.message;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="activity" class="w-3.5 h-3.5"></i><span>測試連線</span>`;
+        lucide.createIcons();
+      }
+    }
+
+    function saveSettings() {
+      const baseUrl = document.getElementById("cfgBaseUrl").value.trim();
+      const apiKey = document.getElementById("cfgApiKey").value.trim();
+      const chatModel = getChatModelValue();
+      const embeddingModel = getEmbeddingModelValue();
+
+      if (!baseUrl || !chatModel || !embeddingModel) {
+        alert("請確認 Base URL、Chat Model 與 Embedding Model 均已填寫。");
+        return;
+      }
+
+      saveStoredSettings({ baseUrl, apiKey, chatModel, embeddingModel });
+      updateStatusBadge();
+      closeSettingsModal();
+    }
+
+    // Document Management
+    async function fetchDocuments() {
+      try {
+        const res = await fetch("/api/documents");
+        const data = await res.json();
+        documents = data.documents || [];
+        renderDocuments();
+      } catch (e) {
+        console.error("Failed to load documents", e);
+      }
+    }
+
+    function renderDocuments() {
+      const list = document.getElementById("documentsList");
+      if (documents.length === 0) {
+        list.innerHTML = `
+          <div id="docsEmptyState" class="text-center py-10 px-4 text-slate-400">
+            <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+            <p class="text-xs">目前尚未上傳任何文件</p>
+            <p class="text-[11px] text-slate-400 mt-1">上傳後即可在右側以對話方式查詢內容</p>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      list.innerHTML = documents.map(doc => {
+        const isSelected = activeDocScope === doc.doc_id;
+        const sizeFormatted = (doc.file_size / 1024).toFixed(1) + " KB";
+        return `
+          <div class="group p-2.5 rounded-xl border transition-all cursor-pointer ${
+            isSelected 
+              ? "bg-indigo-50/70 border-indigo-300 shadow-sm" 
+              : "bg-white border-slate-200 hover:border-slate-300"
+          }" onclick="selectScope('${doc.doc_id}')">
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <i data-lucide="file-text" class="w-4 h-4 text-indigo-600 shrink-0"></i>
+                <span class="text-xs font-medium text-slate-800 truncate" title="${escapeHtml(doc.filename)}">${escapeHtml(doc.filename)}</span>
+              </div>
+              <button onclick="event.stopPropagation(); deleteDocument('${doc.doc_id}')" class="text-slate-300 hover:text-rose-600 transition-colors opacity-0 group-hover:opacity-100 p-0.5">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+            <div class="flex items-center gap-2 text-[10px] text-slate-400 mt-1.5 ml-6 flex-wrap">
+              <span>${sizeFormatted}</span>
+              <span>•</span>
+              <span>${doc.page_count} 頁</span>
+              <span>•</span>
+              <span>${doc.chunks_count} 段落塊</span>
+              ${doc.embedding_model ? `<span>•</span><span class="bg-slate-100 text-slate-600 px-1 py-0.5 rounded font-mono text-[9px]">${escapeHtml(doc.embedding_model)}</span>` : ''}
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      lucide.createIcons();
+    }
+
+    function selectScope(docId) {
+      activeDocScope = docId;
+      const label = document.getElementById("activeScopeLabel");
+      const btnAll = document.getElementById("btnScopeAll");
+
+      if (docId) {
+        const doc = documents.find(d => d.doc_id === docId);
+        label.innerText = doc ? doc.filename : "單一文件";
+        btnAll.classList.remove("font-bold");
+      } else {
+        label.innerText = "全部文件";
+        btnAll.classList.add("font-bold");
+      }
+      renderDocuments();
+    }
+
+    async function deleteDocument(docId) {
+      if (!confirm("確定要移除此文件及其向量資料庫索引嗎？")) return;
+      try {
+        const res = await fetch(`/api/documents/${docId}`, { method: "DELETE" });
+        if (res.ok) {
+          if (activeDocScope === docId) selectScope(null);
+          await fetchDocuments();
+        } else {
+          alert("刪除失敗。");
+        }
+      } catch (err) {
+        alert("刪除出錯: " + err.message);
+      }
+    }
+
+    // Drag and Drop & Upload
+    function setupDragAndDrop() {
+      const dropZone = document.getElementById("dropZone");
+      const fileInput = document.getElementById("fileInput");
+
+      dropZone.onclick = () => fileInput.click();
+
+      fileInput.onchange = (e) => {
+        if (e.target.files && e.target.files[0]) {
+          uploadFile(e.target.files[0]);
+        }
+      };
+
+      dropZone.ondragover = (e) => {
+        e.preventDefault();
+        dropZone.classList.add("border-indigo-600", "bg-indigo-50/50");
+      };
+
+      dropZone.ondragleave = () => {
+        dropZone.classList.remove("border-indigo-600", "bg-indigo-50/50");
+      };
+
+      dropZone.ondrop = (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("border-indigo-600", "bg-indigo-50/50");
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+          uploadFile(e.dataTransfer.files[0]);
+        }
+      };
+    }
+
+    async function uploadFile(file) {
+      const s = getStoredSettings();
+      if (!s.baseUrl || !s.embeddingModel) {
+        alert("上傳文件前，請先點擊右上角「AI 連線設定」配置 Base URL 與 Embedding Model。");
+        openSettingsModal();
+        return;
+      }
+
+      const statusBox = document.getElementById("uploadStatus");
+      const statusMsg = document.getElementById("uploadStatusMsg");
+      statusBox.classList.remove("hidden");
+      statusMsg.innerText = `正在讀取並解析《${file.name}》...`;
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("base_url", s.baseUrl);
+      formData.append("api_key", s.apiKey);
+      formData.append("embedding_model", s.embeddingModel);
+
+      try {
+        statusMsg.innerText = `正在產生向量索引與 BM25 結構（調用 ${s.embeddingModel}）...`;
+        const res = await fetch("/api/documents/upload", {
+          method: "POST",
+          body: formData
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          statusMsg.innerText = `已完成索引！共 ${data.chunks_count} 個段落。`;
+          setTimeout(() => statusBox.classList.add("hidden"), 3000);
+          await fetchDocuments();
+        } else {
+          alert("文件上傳失敗：" + (data.detail || "未知錯誤"));
+          statusBox.classList.add("hidden");
+        }
+      } catch (err) {
+        alert("上傳發生例外錯誤：" + err.message);
+        statusBox.classList.add("hidden");
+      }
+    }
+
+    // Chat Handling & Multi-Turn History
+    function clearChatHistory() {
+      if (conversationHistory.length > 0 && !confirm("確定要清空當前對話歷史嗎？")) return;
+      conversationHistory = [];
+      lastCitationsMap = {};
+      const container = document.getElementById("chatContainer");
+      container.innerHTML = `
+        <div class="max-w-3xl mx-auto bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
+          <div class="flex items-start gap-4">
+            <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-100">
+              <i data-lucide="sparkles" class="w-5 h-5"></i>
+            </div>
+            <div class="space-y-2 text-sm text-slate-700">
+              <h3 class="text-base font-bold text-slate-900">對話已重置</h3>
+              <p class="text-xs text-slate-500">已開啟新會話，隨時可以在下方輸入問題針對已上傳的文件進行檢索與多輪追問。</p>
+            </div>
+          </div>
+        </div>
+      `;
+      lucide.createIcons();
+    }
+
+    function exportChatMarkdown() {
+      if (conversationHistory.length === 0) {
+        alert("目前尚無對話記錄可匯出。");
+        return;
+      }
+
+      let md = `# DocuClarify 文件問答對話紀錄\n\n產生時間：${new Date().toLocaleString()}\n\n---\n\n`;
+      for (const msg of conversationHistory) {
+        if (msg.role === "user") {
+          md += `### 👤 使用者提問：\n${msg.content}\n\n`;
+        } else if (msg.role === "assistant") {
+          md += `### 🤖 DocuClarify 回答：\n${msg.content}\n\n---\n\n`;
+        }
+      }
+
+      const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `DocuClarify_Export_${Date.now()}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function autoResizeTextarea(textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = (textarea.scrollHeight) + 'px';
+    }
+
+    let isComposing = false;
+    let isSendingMessage = false;
+
+    function onCompositionStart(e) {
+      isComposing = true;
+    }
+
+    function onCompositionEnd(e) {
+      // 緩衝 80ms 防止中文/注音輸入法按 Enter 確認選字時，緊接著觸發 keydown 發送
+      isComposing = true;
+      setTimeout(() => {
+        isComposing = false;
+      }, 80);
+    }
+
+    function handleKeyDown(e) {
+      // 若處於中文輸入法組字中 (如注音、拼音選字)，忽略 Enter 鍵
+      if (e.isComposing || e.keyCode === 229 || isComposing) {
+        return;
+      }
+
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.repeat || isSendingMessage) return;
+        handleSendMessage(e);
+      }
+    }
+
+    async function handleSendMessage(e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      if (isSendingMessage) return;
+
+      const input = document.getElementById("questionInput");
+      const question = input.value.trim();
+      if (!question) return;
+
+      const s = getStoredSettings();
+      if (!s.baseUrl || !s.chatModel || !s.embeddingModel) {
+        alert("請先完成右上角的「AI 連線設定」，以提供您要使用的 AI 伺服器與模型。");
+        openSettingsModal();
+        return;
+      }
+
+      isSendingMessage = true;
+
+      appendUserMessage(question);
+      input.value = "";
+      input.style.height = "auto";
+
+      const btnSend = document.getElementById("btnSend");
+      btnSend.disabled = true;
+      btnSend.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>`;
+      lucide.createIcons();
+
+      const bubbleId = appendAssistantPlaceholder();
+
+      try {
+        const res = await fetch("/api/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            question: question,
+            doc_id: activeDocScope,
+            base_url: s.baseUrl,
+            api_key: s.apiKey,
+            chat_model: s.chatModel,
+            embedding_model: s.embeddingModel,
+            top_k: 4,
+            history: conversationHistory.slice(-6)
+          })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || `伺服器回應錯誤 (HTTP ${res.status})`);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let currentEventType = "message";
+        let fullAssistantText = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop();
+
+          for (let line of lines) {
+            line = line.trim();
+            if (!line) {
+              currentEventType = "message";
+              continue;
+            }
+            if (line.startsWith("event: ")) {
+              currentEventType = line.slice(7).trim();
+            } else if (line.startsWith("data: ")) {
+              const dataStr = line.slice(6).trim();
+
+              if (currentEventType === "citations") {
+                try {
+                  const citations = JSON.parse(dataStr);
+                  lastCitationsMap[bubbleId] = citations;
+                  renderCitationsInBubble(bubbleId, citations);
+                } catch (err) {
+                  console.error("Citations parse error", err);
+                }
+              } else if (currentEventType === "message") {
+                if (dataStr === "[DONE]") break;
+                try {
+                  const msgData = JSON.parse(dataStr);
+                  if (msgData.delta) {
+                    fullAssistantText += msgData.delta;
+                    updateAssistantText(bubbleId, fullAssistantText);
+                  }
+                } catch (err) {
+                  console.error("Token parse error", err);
+                }
+              } else if (currentEventType === "error") {
+                try {
+                  const errObj = JSON.parse(dataStr);
+                  finalizeAssistantText(bubbleId, fullAssistantText + `\n\n⚠️ 錯誤：${errObj.error}`);
+                } catch (err) {
+                  finalizeAssistantText(bubbleId, fullAssistantText + `\n\n⚠️ 錯誤：${dataStr}`);
+                }
+              }
+            }
+          }
+        }
+
+        finalizeAssistantText(bubbleId, fullAssistantText);
+
+        // Record in conversation history for multi-turn chat
+        conversationHistory.push({ role: "user", content: question });
+        conversationHistory.push({ role: "assistant", content: fullAssistantText });
+
+      } catch (err) {
+        finalizeAssistantText(bubbleId, `⚠️ 發生錯誤：${err.message}`);
+      } finally {
+        isSendingMessage = false;
+        btnSend.disabled = false;
+        btnSend.innerHTML = `<i data-lucide="send" class="w-4 h-4"></i>`;
+        lucide.createIcons();
+      }
+    }
+
+    function appendUserMessage(text) {
+      const container = document.getElementById("chatContainer");
+      const wrapper = document.createElement("div");
+      wrapper.className = "flex gap-3 max-w-3xl mx-auto justify-end";
+      wrapper.innerHTML = `
+        <div class="bg-indigo-600 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm max-w-xl shadow-sm leading-relaxed whitespace-pre-wrap">
+          ${escapeHtml(text)}
+        </div>
+      `;
+      container.appendChild(wrapper);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function appendAssistantPlaceholder() {
+      const container = document.getElementById("chatContainer");
+      const id = "bubble_" + Date.now();
+      const wrapper = document.createElement("div");
+      wrapper.id = id;
+      wrapper.className = "flex gap-3 max-w-3xl mx-auto justify-start group";
+      wrapper.innerHTML = `
+        <div class="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+          <i data-lucide="bot" class="w-4 h-4"></i>
+        </div>
+        <div class="flex-1 bg-white border border-slate-200/80 rounded-2xl rounded-tl-sm p-4 text-sm text-slate-800 shadow-sm prose-custom leading-relaxed relative">
+          <div class="citations-container"></div>
+          <div class="bubble-text whitespace-pre-wrap"><span class="inline-flex items-center gap-1.5 text-xs text-slate-400"><i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-indigo-600"></i>正在混合檢索段落並連線生成...</span></div>
+          <div class="bubble-actions hidden flex items-center justify-end gap-2 mt-3 pt-2 border-t border-slate-100 text-slate-400">
+            <button onclick="copyBubbleText('${id}')" class="text-xs hover:text-indigo-600 flex items-center gap-1 transition-colors px-2 py-1 rounded hover:bg-slate-50">
+              <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+              <span>複製回答</span>
+            </button>
+          </div>
+        </div>
+      `;
+      container.appendChild(wrapper);
+      container.scrollTop = container.scrollHeight;
+      lucide.createIcons();
+      return id;
+    }
+
+    function updateAssistantText(bubbleId, text) {
+      const bubble = document.getElementById(bubbleId);
+      if (!bubble) return;
+      const textElem = bubble.querySelector(".bubble-text");
+      if (textElem) {
+        // Fast streaming render with cursor
+        textElem.innerHTML = marked.parse(text) + `<span class="cursor-pulse text-indigo-600 font-bold ml-0.5 animate-pulse">▍</span>`;
+      }
+      const container = document.getElementById("chatContainer");
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function finalizeAssistantText(bubbleId, text) {
+      const bubble = document.getElementById(bubbleId);
+      if (!bubble) return;
+      const textElem = bubble.querySelector(".bubble-text");
+      if (textElem) {
+        textElem.innerHTML = marked.parse(text);
+      }
+      const actions = bubble.querySelector(".bubble-actions");
+      if (actions) {
+        actions.classList.remove("hidden");
+      }
+      lucide.createIcons();
+    }
+
+    function copyBubbleText(bubbleId) {
+      const bubble = document.getElementById(bubbleId);
+      if (!bubble) return;
+      const textElem = bubble.querySelector(".bubble-text");
+      if (textElem) {
+        navigator.clipboard.writeText(textElem.innerText).then(() => {
+          alert("已複製回答內容至剪貼簿！");
+        }).catch(err => {
+          console.error("複製失敗", err);
+        });
+      }
+    }
+
+    function renderCitationsInBubble(bubbleId, citations) {
+      const bubble = document.getElementById(bubbleId);
+      if (!bubble || !citations || citations.length === 0) return;
+      const citationsContainer = bubble.querySelector(".citations-container");
+      if (!citationsContainer) return;
+
+      const citationCards = citations.map((c, i) => `
+        <details class="group bg-slate-50 border border-slate-200 rounded-xl overflow-hidden transition-all mb-1.5">
+          <summary class="flex items-center justify-between px-3 py-2 text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-100 list-none select-none">
+            <div class="flex items-center gap-1.5 truncate">
+              <span class="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] inline-flex items-center justify-center shrink-0">${i+1}</span>
+              <span class="truncate font-semibold text-slate-800">《${escapeHtml(c.filename)}》</span>
+              <span class="text-slate-400 font-normal">第 ${c.page_number} 頁</span>
+              ${c.is_merged ? '<span class="text-[9px] bg-indigo-50 text-indigo-700 border border-indigo-200/80 px-1.5 py-0.5 rounded font-medium">🔗 連續段落拼接</span>' : ''}
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0 ml-2">
+              <span class="text-[10px] text-slate-400 bg-white px-2 py-0.5 rounded border border-slate-200">相關度 ${(c.score * 100).toFixed(0)}%</span>
+            </div>
+          </summary>
+          <div class="p-3 text-xs text-slate-600 bg-white border-t border-slate-100 font-mono leading-relaxed max-h-36 overflow-y-auto whitespace-pre-wrap">
+            ${escapeHtml(c.text)}
+          </div>
+        </details>
+      `).join("");
+
+      citationsContainer.innerHTML = `
+        <div class="mb-3 pb-3 border-b border-slate-100">
+          <div class="flex items-center gap-1.5 text-xs font-semibold text-slate-600 mb-2">
+            <i data-lucide="book-open" class="w-3.5 h-3.5 text-indigo-600"></i>
+            <span>引用來源 (${citations.length} 處 - 混合檢索融合)</span>
+          </div>
+          <div class="space-y-1.5">
+            ${citationCards}
+          </div>
+        </div>
+      `;
+      lucide.createIcons();
+    }
+
+    function escapeHtml(str) {
+      if (!str) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+  </script>
+</body>
+</html>
