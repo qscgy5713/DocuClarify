@@ -190,13 +190,39 @@ class ChatRequest(BaseModel):
     chat_model: str
     embedding_model: str
     top_k: int = 4
+    system_prompt: Optional[str] = None
     history: Optional[List[ChatMessage]] = Field(default_factory=list)
+
+
+DEFAULT_SYSTEM_INSTRUCTION = (
+    "你是一位具備頂尖洞察力、嚴密邏輯與跨領域分析能力的「資深文檔專家與智庫顧問」。\n"
+    "你的職責是深入研讀、穿透並分析提供的參考文件內容，為使用者的提問提供深刻、結構化且具實質決策價值的專業解答。\n\n"
+    "【核心分析與思考框架】\n"
+    "1. 核心意圖穿透（Intent & Synthesis）：\n"
+    "   - 不要停留在機械式的字面比對；深入理解使用者問題背後的本質目的（例如：評估業務風險、技術架構可行性、關鍵數據對比、合約條款陷阱、或總結核心論點）。\n"
+    "   - 進行跨段落與跨來源綜合推理（Cross-Context Fusion）：靈活串聯分散在不同章節或頁面的零散資訊，理清其前後脈絡、因果關聯或潛在矛盾。\n\n"
+    "2. 嚴謹求實與智力推論的平衡：\n"
+    "   - 嚴格奠基於事實：數據、專案名稱、法定條款、核心結論等，必須忠實於參考文檔，絕不可無中生有或捏造事實。\n"
+    "   - 允許專業邏輯演繹：若使用者詢問背後意涵、優劣分析或後續建議，請在文檔確鑿事實的基礎上給出專業推論，並明確說明推論脈絡（例如「根據文件第 X 頁...，可進一步評估...」）。\n"
+    "   - 誠實指明文檔盲點：若文檔確實未提及某細節，請精確說明文檔缺乏哪方面的資料，並依現有文檔最相關的篇章給予建設性的替代指引。\n\n"
+    "【專業呈現與排版準則】\n"
+    "1. 【核心結論】（TL;DR）：在回答的最開頭，用 1~2 句話直接提煉最核心的結論或答案要點，讓讀者第一眼即抓住關鍵。\n"
+    "2. 【結構化深度剖析】：層次分明地拆解細節，使用清晰的數字序號、項目符號與重點加粗。\n"
+    "3. 【主動善用對比表格】：當涉及方案評估、多個實體比較、優缺點分析、數據變更時，優先使用 Markdown 表格直觀呈現。\n"
+    "4. 【專家洞察與建議】：在適當情境下，於文末補充專業洞見（如潛在風險、實施注意事項、或值得追蹤的關鍵指標）。\n\n"
+    "【引用出處標註規範（Citations）】\n"
+    "- 每當引述或參考了特定文件段落的內容、數據或論點時，必須自然地在該語句後方附上對應的來源標籤，例如 [來源 1] 或 [來源 2]，保持嚴謹透明。\n\n"
+    "【語言與風格】\n"
+    "- 請全篇使用流暢、自然且符合台灣習慣用語的標準繁體中文（如：資訊、專案、最佳化、架構、程式）。\n"
+    "- 保持自信專業、條理清晰且具洞察力的智庫顧問語調。"
+)
 
 
 def _build_rag_prompt_messages(
     question: str,
     retrieved_chunks: List[Dict[str, Any]],
     history: Optional[List[ChatMessage]] = None,
+    custom_system_prompt: Optional[str] = None,
 ) -> List[Dict[str, str]]:
     context_blocks = []
     for idx, chunk in enumerate(retrieved_chunks):
@@ -210,13 +236,9 @@ def _build_rag_prompt_messages(
     )
 
     system_instruction = (
-        "你是一位嚴謹、客觀且專業的文件知識助手。\n"
-        "請【完全依據】下方提供的「參考文件內容」來回答使用者的問題。\n"
-        "回答準則：\n"
-        "1. 每當你在回答中引用了參考內容中的特定事實或數據時，必須緊隨該段落附上對應的來源標籤，例如 [來源 1] 或 [來源 2]。\n"
-        "2. 若參考文件中並未提及或無法推導出答案，請坦白告知「參考資料中未載明此資訊」，切勿憑空捏造。\n"
-        "3. 若使用者進行多輪追問，請結合先前的對話脈絡與參考內容進行精確解答。\n"
-        "4. 保持回答條理分明、重點突出，使用繁體中文。"
+        custom_system_prompt.strip()
+        if custom_system_prompt and custom_system_prompt.strip()
+        else DEFAULT_SYSTEM_INSTRUCTION
     )
 
     messages: List[Dict[str, str]] = [
@@ -229,8 +251,12 @@ def _build_rag_prompt_messages(
             messages.append({"role": msg.role, "content": msg.content})
 
     user_prompt = (
-        f"【參考文件內容】：\n{context_str}\n\n"
-        f"【使用者問題】：\n{question}"
+        "請仔細研讀以下已檢索的文件參考段落，並結合整體對話脈絡，以顧問級的深度為使用者提供清晰、精準且具洞察力的專業解答：\n\n"
+        f"=================== 參考文件內容 ===================\n"
+        f"{context_str}\n"
+        f"===================================================\n\n"
+        f"【使用者的問題】：\n{question}\n\n"
+        "請依據上述參考內容，給出條理清晰的分析解答（引用事實或數據處請自然標記 [來源 X]）："
     )
     messages.append({"role": "user", "content": user_prompt})
     return messages
@@ -273,7 +299,7 @@ async def chat_with_docs(req: ChatRequest):
         }
 
     messages = _build_rag_prompt_messages(
-        question, retrieved_chunks, req.history
+        question, retrieved_chunks, req.history, req.system_prompt
     )
 
     try:
@@ -324,7 +350,7 @@ async def chat_with_docs_stream(req: ChatRequest):
     )
 
     messages = _build_rag_prompt_messages(
-        question, retrieved_chunks, req.history
+        question, retrieved_chunks, req.history, req.system_prompt
     )
 
     async def event_generator():
@@ -357,7 +383,7 @@ async def chat_with_docs_stream(req: ChatRequest):
             yield "event: done\ndata: [DONE]\n\n"
         except Exception as e:
             err_json = json.dumps({"error": str(e)}, ensure_ascii=False)
-            yield f"event: error\ndata: {err_payload if 'err_payload' in locals() else err_json}\n\n"
+            yield f"event: error\ndata: {err_json}\n\n"
 
     return StreamingResponse(
         event_generator(),
